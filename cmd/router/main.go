@@ -31,7 +31,9 @@ func main() {
 	defaultKernel := flag.String("default", "", "fallback kernel URL when no prefix matches")
 	healthTimeout := flag.Duration("health-timeout", 2*time.Second, "timeout for per-kernel health checks")
 	var shardValues shardFlags
+	var peerValues shardFlags
 	flag.Var(&shardValues, "shard", "shard rule in format urn_prefix=http://host:port")
+	flag.Var(&peerValues, "peer", "peer router URL for federation cascade (WF16)")
 	flag.Parse()
 
 	rules := make([]proxy.ShardRule, 0, len(shardValues)+1)
@@ -64,7 +66,15 @@ func main() {
 
 	router := proxy.NewRouter(rules)
 	router.HealthTimeout = *healthTimeout
-	log.Printf("router: listening on %s, shards: %d", *listenAddr, len(rules))
+
+	for _, peerURL := range peerValues {
+		trimmed := strings.TrimRight(strings.TrimSpace(peerURL), "/")
+		if trimmed != "" {
+			router.Peers = append(router.Peers, trimmed)
+		}
+	}
+
+	log.Printf("router: listening on %s, shards: %d, peers: %d", *listenAddr, len(rules), len(router.Peers))
 	if err := http.ListenAndServe(*listenAddr, router); err != nil {
 		log.Fatalf("router: %v", err)
 	}

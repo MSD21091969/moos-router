@@ -27,6 +27,7 @@ type ShardRule struct {
 // Router holds the shard table and routes requests.
 type Router struct {
 	Rules         []ShardRule
+	Peers         []string // peer router URLs for federation cascade (WF16)
 	kernels       []string
 	client        *http.Client
 	HealthTimeout time.Duration
@@ -135,13 +136,56 @@ func (r *Router) handleRoutedNodeRequest(w http.ResponseWriter, req *http.Reques
 		urn = decodedURN
 	}
 
+	// Try local shard first
 	target := r.Route(urn)
-	if target == "" {
-		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("no shard rule matches URN %s", urn))
+	if target != "" {
+		resp, body, err := r.tryForward(req, target)
+		if err == nil && resp.StatusCode != http.StatusNotFound {
+			copyHeaders(w.Header(), resp.Header)
+			w.WriteHeader(resp.StatusCode)
+			w.Write(body)
+			return
+		}
+	}
+
+	// Cascade to peer routers (WF16 federation read path)
+	for _, peerURL := range r.Peers {
+		resp, body, err := r.tryForward(req, peerURL)
+		if err != nil {
+			log.Printf("proxy: peer cascade skip %s: %v", peerURL, err)
+			continue
+		}
+		if resp.StatusCode == http.StatusNotFound {
+			continue
+		}
+		copyHeaders(w.Header(), resp.Header)
+		w.WriteHeader(resp.StatusCode)
+		w.Write(body)
 		return
 	}
 
-	r.forwardSingle(w, req, target, nil)
+	writeError(w, http.StatusNotFound, fmt.Sprintf("node %s not found in local shards or peers", urn))
+}
+
+func (r *Router) tryForward(req *http.Request, targetBaseURL string) (*http.Response, []byte, error) {
+	targetURL := joinURL(targetBaseURL, req.URL.Path, req.URL.RawQuery)
+	proxyReq, err := http.NewRequestWithContext(req.Context(), req.Method, targetURL, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	copyHeaders(proxyReq.Header, req.Header)
+
+	resp, err := r.client.Do(proxyReq)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return resp, nil, err
+	}
+	return resp, body, nil
 }
 
 func (r *Router) forwardSingle(w http.ResponseWriter, req *http.Request, targetBaseURL string, body []byte) {

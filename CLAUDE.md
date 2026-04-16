@@ -46,7 +46,7 @@ local shard returns 404. Implements WF16 federation read path.
 internal/proxy/
   proxy.go       — Router struct, ShardRule, ServeHTTP dispatcher,
                    all routing / fan-out / health logic
-  proxy_test.go  — 8 test functions (unit + integration via httptest)
+  proxy_test.go  — 9 test functions (unit + integration via httptest)
 cmd/router/
   main.go        — CLI entry point, flag parsing, wires ShardRules → Router
 ```
@@ -92,7 +92,7 @@ it is always matched last.
 go test ./internal/proxy   # or go test ./...
 ```
 
-8 test functions in `proxy_test.go`:
+9 test functions in `proxy_test.go`:
 
 | Test | What it covers |
 |------|---------------|
